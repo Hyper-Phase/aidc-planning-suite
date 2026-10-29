@@ -16,6 +16,28 @@ class PlanningAPI(unittest.TestCase):
     def payload(self):
         return {'apiKey': 'test-key', 'model': api.MODELS[0]['id'], 'text': 'site brief'}
 
+    def test_original_and_rewritten_routes(self):
+        from io import BytesIO
+        for path in ('/api/models', '/api/models?cache=1', '/api/index?endpoint=models'):
+            request = object.__new__(api.handler)
+            request.path = path
+            with patch.object(request, '_respond') as respond:
+                request.do_GET()
+                self.assertEqual(respond.call_args.args[0], 200)
+                self.assertEqual(respond.call_args.args[1]['models'], api.MODELS)
+        for path in ('/api/plan', '/api/index?endpoint=plan'):
+            request = object.__new__(api.handler)
+            request.path = path
+            request.headers = {'Content-Length': '2'}
+            request.rfile = BytesIO(b'{}')
+            with patch.object(request, '_respond') as respond:
+                request.do_POST()
+                self.assertEqual(respond.call_args.args[0], 400)
+        request.path = '/api/index?endpoint=unknown'
+        with patch.object(request, '_respond') as respond:
+            request.do_GET()
+            self.assertEqual(respond.call_args.args[0], 404)
+
     def test_invalid_input(self):
         self.assertEqual(api._plan({})[0], 400)
         self.assertEqual(api._plan({**self.payload(), 'model': 'unknown'})[0], 400)

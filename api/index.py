@@ -6,6 +6,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
@@ -139,14 +140,23 @@ def _table_rows(context, study, manifest):
 
 
 class handler(BaseHTTPRequestHandler):
+    def _endpoint(self):
+        url = urlsplit(self.path)
+        path = url.path.rstrip("/")
+        if path == "/api/index":
+            endpoint = parse_qs(url.query).get("endpoint", [""])[0]
+            if endpoint in ("models", "plan"):
+                return "/api/" + endpoint
+        return path
+
     def do_GET(self):
-        if self.path.rstrip("/") == "/api/models":
+        if self._endpoint() == "/api/models":
             self._respond(200, {"models": MODELS})
         else:
             self._respond(404, {"error": "Not found"})
 
     def do_POST(self):
-        if self.path.rstrip("/") != "/api/plan":
+        if self._endpoint() != "/api/plan":
             return self._respond(404, {"error": "Not found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))

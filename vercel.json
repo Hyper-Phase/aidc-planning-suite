@@ -7,6 +7,17 @@
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index" }
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/models",
+      "destination": "/api/index?endpoint=models"
+    },
+    {
+      "source": "/api/plan",
+      "destination": "/api/index?endpoint=plan"
+    }
   ]
 }

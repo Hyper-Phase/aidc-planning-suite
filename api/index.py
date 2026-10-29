@@ -7,12 +7,14 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 sys.dont_write_bytecode = True
 
 MODELS = [
+    {"id": "deepseek/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash"},
     {"id": "openai/gpt-4o-mini", "label": "GPT-4o mini"},
     {"id": "anthropic/claude-3.5-haiku", "label": "Claude 3.5 Haiku"},
     {"id": "google/gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
@@ -51,6 +53,10 @@ def _plan(data):
             context = complete_initial_information({"text": text, "backend": "scipy", "interactive": False})
         finally:
             REQUEST_AGENT.reset(token)
+        interpretation_error = (context.get("semantic_trace") or {}).get("extract_error")
+        if interpretation_error:
+            return 502, {"error": "OpenRouter could not interpret the site brief. Your input has not been checked yet.",
+                         "details": [str(interpretation_error).replace(api_key, "[redacted]")[:700]], "model": model}
         if context["missing"] or context.get("clarification_issues") or not context["research"].get("point"):
             details = list(context["missing"])
             details.extend(context.get("clarification_issues", {}).values())
@@ -84,13 +90,34 @@ class _RequestAgent:
         self.api_key, self.model = api_key, model
 
     def complete(self, system, user):
-        from langchain_openrouter import ChatOpenRouter
-        client = ChatOpenRouter(model=self.model, temperature=0, api_key=self.api_key).bind(
-            timeout_ms=120_000, retries=None)
-        response = client.invoke([("system", system), ("human", user)])
-        content = response.content
-        if not isinstance(content, str):
-            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        request = Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps({"model": self.model, "temperature": 0,
+                             "messages": [{"role": "system", "content": system},
+                                          {"role": "user", "content": user}]}).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            method="POST")
+        try:
+            with urlopen(request, timeout=120) as response:
+                payload = json.load(response)
+        except HTTPError as exc:
+            try:
+                error = json.loads(exc.read(8192)).get("error", {})
+                reason = error.get("message", "Request rejected") if isinstance(error, dict) else str(error)
+            except (ValueError, UnicodeError):
+                reason = "Request rejected"
+            reason = str(reason).replace(self.api_key, "[redacted]")[:500]
+            raise RuntimeError(f"OpenRouter HTTP {exc.code} for {self.model}: {reason}") from None
+        except (URLError, TimeoutError):
+            raise RuntimeError("OpenRouter inference could not be reached or timed out. Please try again.") from None
+        if payload.get("error"):
+            raise RuntimeError("OpenRouter returned an inference error. Check model availability and account permissions.")
+        try:
+            content = payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError("OpenRouter returned no usable model response.") from None
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("OpenRouter returned an empty model response.")
         return {"raw": content, "model": self.model, "provider": "OpenRouter"}
 
 

@@ -53,6 +53,34 @@ class PlanningAPI(unittest.TestCase):
             self.assertIn('id="apiKey"', html)
             self.assertIn('lang="en"', html)
 
+    def test_openrouter_request_uses_selected_model_and_key(self):
+        from io import BytesIO
+        response = BytesIO(json.dumps({'choices': [{'message': {'content': '{"facts": []}'}}]}).encode())
+        with patch.object(api, 'urlopen', return_value=response) as call:
+            result = api._RequestAgent('test-key', 'deepseek/deepseek-v4.1-flash').complete('instructions', 'brief')
+        request = call.call_args.args[0]
+        self.assertEqual(request.full_url, 'https://openrouter.ai/api/v1/chat/completions')
+        self.assertEqual(request.get_header('Authorization'), 'Bearer test-key')
+        self.assertEqual(json.loads(request.data)['model'], 'deepseek/deepseek-v4.1-flash')
+        self.assertEqual(result['raw'], '{"facts": []}')
+
+    def test_forbidden_error_preserves_provider_reason_and_redacts_key(self):
+        from io import BytesIO
+        failure = HTTPError('https://openrouter.ai', 403, 'Forbidden', {}, BytesIO(b'{"error":{"message":"Model access denied test-key"}}'))
+        with patch.object(api, 'urlopen', side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, 'OpenRouter HTTP 403') as caught:
+                api._RequestAgent('test-key', api.MODELS[0]['id']).complete('s', 'u')
+        self.assertIn('Model access denied', str(caught.exception))
+        self.assertNotIn('test-key', str(caught.exception))
+
+    def test_interpretation_failure_is_not_reported_as_missing_fields(self):
+        context = {'missing': ['gpu_count'], 'research': {}, 'semantic_trace': {'extract_error': 'OpenRouter HTTP 403: access denied'}}
+        with patch.object(api, '_verify_key', return_value=True), patch('initial_input.complete_initial_information', return_value=context):
+            status, body = api._plan(self.payload())
+        self.assertEqual(status, 502)
+        self.assertNotIn('gpu_count', json.dumps(body))
+        self.assertIn('403', body['details'][0])
+
     def test_invalid_input(self):
         self.assertEqual(api._plan({})[0], 400)
         self.assertEqual(api._plan({**self.payload(), 'model': 'unknown'})[0], 400)

@@ -38,6 +38,21 @@ class PlanningAPI(unittest.TestCase):
             request.do_GET()
             self.assertEqual(respond.call_args.args[0], 404)
 
+    def test_homepage_is_served_as_html(self):
+        from io import BytesIO
+        for path in ('/', '/index.html', '/api/index?endpoint=panel'):
+            request = object.__new__(api.handler)
+            request.path = path
+            request.wfile = BytesIO()
+            with patch.object(request, 'send_response') as status, patch.object(request, 'send_header') as headers, patch.object(request, 'end_headers'):
+                request.do_GET()
+            status.assert_called_once_with(200)
+            headers.assert_any_call('Content-Type', 'text/html; charset=utf-8')
+            html = request.wfile.getvalue().decode()
+            self.assertIn('id="form"', html)
+            self.assertIn('id="apiKey"', html)
+            self.assertIn('lang="en"', html)
+
     def test_invalid_input(self):
         self.assertEqual(api._plan({})[0], 400)
         self.assertEqual(api._plan({**self.payload(), 'model': 'unknown'})[0], 400)

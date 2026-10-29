@@ -5,7 +5,7 @@ This repository contains the `demo.py` v4.5 research workflow and a Vercel-hoste
 ## Deploy to Vercel
 
 1. Import this repository into Vercel and use the repository root as the Root Directory.
-2. Use the Other framework preset and leave the Build Command unset. The included `vercel.json` routes `/api/*` to the Python function; `index.html` serves the English control panel. The Python function bundles `core/` and `reference/` and allows up to 300 seconds (subject to your Vercel plan).
+2. Use the Other framework preset and leave the Build Command unset. The included `vercel.json` routes `/api/*` to the Python function; the Python handler serves the English control panel from `index.html` at `/` and `/index.html`. The Python function bundles `index.html`, `core/` and `reference/` and allows up to 300 seconds (subject to your Vercel plan).
 3. The panel takes an OpenRouter key per request. It is sent to the Python function over HTTPS, used only for that run, and is not stored as a Vercel environment variable. The key is verified through OpenRouter before any LLM request.
 
 The selected model IDs are configured in `api/index.py` and can be edited there. The server runs the LLM-first v4.5 path; `demo.py` remains available for command-line use.

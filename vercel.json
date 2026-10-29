@@ -3,13 +3,17 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
-      "includeFiles": "{core,reference}/**"
+      "includeFiles": "{index.html,core/**,reference/**}"
     }
   },
   "rewrites": [
     {
       "source": "/",
-      "destination": "/index.html"
+      "destination": "/api/index?endpoint=panel"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/api/index?endpoint=panel"
     },
     {
       "source": "/api/models",

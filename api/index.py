@@ -145,12 +145,23 @@ class handler(BaseHTTPRequestHandler):
         path = url.path.rstrip("/")
         if path == "/api/index":
             endpoint = parse_qs(url.query).get("endpoint", [""])[0]
+            if endpoint == "panel":
+                return "/"
             if endpoint in ("models", "plan"):
                 return "/api/" + endpoint
         return path
 
     def do_GET(self):
-        if self._endpoint() == "/api/models":
+        if self._endpoint() in ("", "/", "/index.html"):
+            body = (ROOT / "index.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self._endpoint() == "/api/models":
             self._respond(200, {"models": MODELS})
         else:
             self._respond(404, {"error": "Not found"})

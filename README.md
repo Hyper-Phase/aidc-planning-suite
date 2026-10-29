@@ -1,41 +1,66 @@
 # AIDC Planning Suite
 
-This repository contains the `demo.py` v4.5 research workflow and a Vercel-hosted control panel. The panel accepts an OpenRouter API key, selects a model, interprets an English site brief, runs the SciPy optimization and scenario workflow, and displays the proposal as a table.
+An English design studio for data-center planning. The model interprets the site brief; SciPy/HiGHS builds and audits the cost-baseline design. The v4.5 workflow then evaluates stress scenarios, faults, finite candidate trade-offs and a demand-change redesign.
 
 ## Deploy to Vercel
 
-1. Import this repository into Vercel and use the repository root as the Root Directory.
-2. Use the Other framework preset and leave the Build Command unset. The included `vercel.json` routes `/api/*` to the Python function; the Python handler serves the English control panel from `index.html` at `/` and `/index.html`. The Python function bundles `index.html`, `core/` and `reference/` and allows up to 300 seconds (subject to your Vercel plan).
-3. The panel takes an OpenRouter key per request. It is sent to the Python function over HTTPS, used only for that run, and is not stored as a Vercel environment variable. The key is verified through OpenRouter before any LLM request.
+1. Import the repository root into Vercel, choose **Other**, and leave the Build Command unset.
+2. In **Project Settings → Environment Variables**, add `OPENROUTER_API_KEY` with your OpenRouter key for the intended environment (for example Production). Enter the value only in Vercel's secure settings, never in GitHub or the page source.
+3. Redeploy after changing environment variables. The panel displays **Server API configured** when the deployed function can read a server key. Visitors then need no API key.
+4. Optionally configure `PLANNER_ACCESS_CODE` to restrict use of the shared server key. Visitors enter the project access code instead of an OpenRouter credential.
 
-The selected model IDs are configured in `api/index.py` and can be edited there. The server runs the LLM-first v4.5 path; `demo.py` remains available for command-line use.
+If no server key is configured, the advanced personal-key input remains available for compatibility. The server key takes precedence. The panel does not save either key or the project access code to browser storage or reports. `/api/config` returns configuration flags and models, never credential values.
 
-## Run locally
+For hosts with a private secret mount, `OPENROUTER_API_KEY_FILE` may point to a UTF-8 text file containing only the key. `OPENROUTER_API_KEY` takes precedence over the file. Do not commit this file, place it in public/static assets, or bundle it with the application. On Vercel, encrypted environment variables are the supported default; uploading a key file into this repository is not required.
 
-Use Python 3.11 or later and install the dependencies:
+`vercel.json` bundles the panel, `core/` and frozen aggregate data into the Python function. It routes `/`, `/index.html`, `/api/models`, `/api/config` and `/api/plan` to the handler. The maximum request duration is 300 seconds, subject to the Vercel plan.
 
-```powershell
+## Design workflow
+
+- Choose an interpretation model; DeepSeek V4.1 Flash is the default.
+- Write an English site brief, load the example, or use guided inputs for compute, site, energy and continuity constraints.
+- When inputs need clarification, complete missing values or edit the brief to resolve conflicts; then retry.
+- Review equipment quantities, investment, operating metrics and findings. The baseline optimizes annual cost subject to the accepted constraints. Renewable-objective optimization is not silently claimed; explicit green-share constraints are supported.
+- Inspect **v4 evaluation details**, then preview, open or download the standalone **HTML report**. Downloaded reports contain site information and design data; store or share them accordingly.
+- Revise the brief and generate another proposal to compare the latest two runs in the current tab. The previous report remains available during a failed update. No server-side project history is stored.
+
+## Report contents and v4 validation
+
+The report contains the input basis and evidence, all modelled equipment capacities and their design roles, CAPEX and annual cost, operational metrics, an hourly dispatch table, assumptions, provenance and a complete structured record.
+
+The API has always called `evaluate("v4.5", ...)`; the earlier compact table omitted most of its results. The studio now exposes all stages and distinguishes evaluation execution from feasibility, conservation audits and service outcomes:
+
+| Stage | Report evidence |
+| --- | --- |
+| v4.1 | Baseline solver status, MIP gap, conservation/matrix/integer checks and independent audit |
+| v4.2 | Seven observed/synthetic stress scenarios; fixed design vs per-case redesign; joint redesign; heat-wave cooling upgrade diagnostic |
+| v4.3 | Eight fault cases with applicability, timing, unserved energy, UPS shortfall and audit outcome; battery precharge mitigation |
+| v4.4 | Audited finite candidates, their equipment/cost/service metrics, preference weights and negotiation rounds |
+| v4.5 | Demand-change trigger, old investment vs new investment, changed capacities and client decisions |
+
+**Completed with findings** means the evaluation ran and found a limitation. An infeasible stress design is not a missing test. A fault conservation audit can pass even when energy is unserved. **Not applicable** and **Not run** are never presented as passed. If the v4 evaluation raises an error, the API does not issue a complete validation report.
+
+Reports are generated from actual solver results without an additional LLM narrative call. HTML text is escaped and the standalone report includes no scripts or remote resources. Equipment quotes, electrical protection, cooling curves, local codes, site measurements and SLA approval remain necessary for engineering design. Plans are research scenarios, not site certification, a continuity guarantee or real-time control.
+
+Frozen public aggregates in `reference/` are reused only for matching coordinates. Other locations collect bounded public data at run time. No raw trace files are included. COPT is optional and not installed.
+
+## Run and test locally
+
+Use Python 3.11 or later:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
-python demo.py
+python -m unittest discover -s tests -v
 ```
 
-For the online workflow, set `OPENROUTER_API_KEY` and optionally `OPENROUTER_MODEL` before running the CLI. The web function passes its request-scoped key directly to the model client and does not use process-global credentials.
+For the CLI, securely export `OPENROUTER_API_KEY`, optionally set `OPENROUTER_MODEL`, and run `python demo.py`. `python demo.py --local` uses explicit offline parsing; location and aggregate cache flags can support a fully offline run. The existing CLI Markdown report is retained; the web API provides the HTML report.
 
-## Scope and data
+For the local web handler, export the server key and run:
 
-The solver uses SciPy/HiGHS. COPT is optional and is not installed by this deployment. Frozen feature aggregates under `reference/` are reused only for matching coordinates; other locations fetch bounded public aggregate data when a run executes. No raw trace files are included. Plans are research scenarios, not site certification, a reliability guarantee, or real-time control.
+```bash
+python -c 'from http.server import ThreadingHTTPServer; from api.index import handler; ThreadingHTTPServer(("127.0.0.1", 8000), handler).serve_forever()'
+```
 
-## Project contents
-
-- `demo.py`, `core/`: five-stage v4.5 CLI workflow and required modules.
-- `api/index.py`: Vercel WSGI endpoint.
-- `index.html`: responsive control panel.
-- `reference/`: small frozen aggregate records needed by the core and coordinate-matched cache.
-
-## Control panel
-
-Enter an OpenRouter API key, choose an interpretation model, enter your English site brief, and click **Generate proposal**. **Use example brief** fills in a complete example. The result table includes site details, cost, green electricity share, audited equipment capacities, stress scenarios, and fault replay outcomes. Requests that need more information show clarification details; edit the brief and submit again.
-
-Keys stay in the current page and are sent only to the planning endpoint and OpenRouter. They are not saved to browser storage. No server-side API key environment variable is required. Online planning requires access to OpenRouter and the public data APIs described above. Live inference and production deployment must be verified with a real key in the deployed panel.
-
-Run backend regression checks with `python -m unittest discover -s tests -v`.
+The tests use mocked key verification/LLM interpretation but run the real cached SciPy solver and all v4 stages. They also cover report escaping, secret precedence, key non-disclosure, missing-test outcomes and routing. Successful local tests do not establish real OpenRouter access for your deployment credentials.

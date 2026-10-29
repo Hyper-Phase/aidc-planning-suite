@@ -22,6 +22,10 @@
     {
       "source": "/api/plan",
       "destination": "/api/index?endpoint=plan"
+    },
+    {
+      "source": "/api/config",
+      "destination": "/api/index?endpoint=config"
     }
   ]
 }

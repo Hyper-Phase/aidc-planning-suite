@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -21,12 +23,42 @@ MODELS = [
 ]
 
 
+def _server_key():
+    """Read a deployment secret; never include it in public metadata or reports."""
+    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if key:
+        return key
+    path = os.environ.get("OPENROUTER_API_KEY_FILE", "").strip()
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            raise RuntimeError("The server API key file is unavailable. Contact the site administrator.") from None
+    return ""
+
+
+def _configuration():
+    try:
+        configured = bool(_server_key())
+    except RuntimeError:
+        configured = False
+    return {"serverKeyConfigured": configured,
+            "accessCodeRequired": bool(os.environ.get("PLANNER_ACCESS_CODE", "")),
+            "workflow": "v4.5", "models": MODELS}
+
+
 def _plan(data):
-    api_key = str(data.get("apiKey") or "").strip()
-    model = str(data.get("model", ""))
+    access_code = os.environ.get("PLANNER_ACCESS_CODE", "")
+    if access_code and not secrets.compare_digest(str(data.get("accessCode") or "").encode(), access_code.encode()):
+        return 401, {"error": "Enter the project access code supplied by the site owner."}
+    try:
+        api_key = _server_key() or str(data.get("apiKey") or "").strip()
+    except RuntimeError as exc:
+        return 503, {"error": str(exc)}
+    model = str(data.get("model") or MODELS[0]["id"])
     text = str(data.get("text") or "").strip()
     if not api_key or len(api_key) > 500:
-        return 400, {"error": "Enter a valid OpenRouter API key."}
+        return 400, {"error": "No API key is configured. The site owner can set OPENROUTER_API_KEY in Vercel, or use the optional personal key field."}
     if model not in {item["id"] for item in MODELS}:
         return 400, {"error": "Choose a supported model."}
     if not text or len(text) > 12_000:
@@ -62,7 +94,12 @@ def _plan(data):
             details.extend(context.get("clarification_issues", {}).values())
             if not context["research"].get("point"):
                 details.append("A valid site location is required.")
-            return 422, {"error": "Input needs clarification.", "details": details}
+            from input_completion import INPUT_QUESTIONS
+            questions = [{"field": field, "label": INPUT_QUESTIONS.get(field, field)} for field in context["missing"]]
+            if not context["research"].get("point"):
+                questions.append({"field": "location", "label": "Site location (city, region, country)"})
+            return 422, {"error": "A few design inputs need your review.", "details": details,
+                         "questions": questions}
 
         cache_file = ROOT / "reference" / "experiment_features.json"
         cache = cache_file if _cache_matches(cache_file, context["research"]["point"]) else None
@@ -76,9 +113,14 @@ def _plan(data):
         if not model_result or not model_result["cost"][0]["verified_feasible"]:
             return 422, {"error": "No audited feasible baseline for these conditions.",
                          "details": context.get("preflight_issues", [])}
-        study = evaluate("v4.5", model_result["boundary"], context["facts"], features,
-                         model_result["cost"], context["backend"])
-        return 200, {"model": model, "rows": _table_rows(context, study, manifest),
+        try:
+            study = evaluate("v4.5", model_result["boundary"], context["facts"], features,
+                             model_result["cost"], context["backend"])
+        except Exception:
+            return 500, {"error": "The baseline solved, but the v4 evaluation did not complete. No complete validation report has been issued."}
+        from web_report import build_report
+        report = build_report(context, manifest, study, model_result["cost"], model)
+        return 200, {"model": model, "rows": _table_rows(context, study, manifest), "report": report,
                      "caveat": "Offline research scenario using public data and explicit assumptions. Not site certification, a reliability guarantee, or real-time control."}
     except Exception as exc:
         return 500, {"error": "Planning failed. Please check your site requirements and try again."}
@@ -151,8 +193,8 @@ def _table_rows(context, study, manifest):
         {"category": "Result", "item": "Green electricity share", "value": round(base.get("green_fraction", 0) * 100, 2), "unit": "%"},
         {"category": "Audit", "item": "Optimization and audits", "value": "Passed" if base.get("verified") else "Not verified", "unit": ""},
     ]
-    for key, label, unit in [("cooling_kw", "Cooling capacity", "kW"), ("battery_kwh", "Battery capacity", "kWh"),
-                             ("pv_kw", "Solar capacity", "kW"), ("grid_kw", "Grid capacity", "kW")]:
+    from web_report import CAPACITIES
+    for key, (label, unit, role) in CAPACITIES.items():
         if key in capacities:
             rows.append({"category": "Design", "item": label, "value": round(capacities[key], 2), "unit": unit})
     for item in study.get("stress", []):
@@ -174,7 +216,7 @@ class handler(BaseHTTPRequestHandler):
             endpoint = parse_qs(url.query).get("endpoint", [""])[0]
             if endpoint == "panel":
                 return "/"
-            if endpoint in ("models", "plan"):
+            if endpoint in ("models", "plan", "config"):
                 return "/api/" + endpoint
         return path
 
@@ -188,6 +230,8 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self._endpoint() == "/api/config":
+            self._respond(200, _configuration())
         elif self._endpoint() == "/api/models":
             self._respond(200, {"models": MODELS})
         else:

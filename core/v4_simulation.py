@@ -74,6 +74,7 @@ def bargain(boundary, scenarios, features, baseline, backend="scipy",
         if pack[0]["verified_feasible"]:
             labels.append("stress_joint_design_on_base_scenarios"); packs.append(pack)
     rows = [{"id": i, "solver_objective": label,
+             "capacities": pack[0]["capacities"], "capex_usd": pack[0].get("capex_usd"),
              **candidate_metrics(pack, features["power"])}
             for i, (label, pack) in enumerate(zip(labels, packs))]
     equal = negotiate(rows)

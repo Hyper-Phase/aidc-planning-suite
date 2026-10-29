@@ -13,6 +13,14 @@ api = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(api)
 
 class PlanningAPI(unittest.TestCase):
+    def setUp(self):
+        self.server = patch.object(api, '_server_key', return_value='')
+        self.server.start()
+        self.addCleanup(self.server.stop)
+        self.access = patch.dict(api.os.environ, {'PLANNER_ACCESS_CODE': ''})
+        self.access.start()
+        self.addCleanup(self.access.stop)
+
     def payload(self):
         return {'apiKey': 'test-key', 'model': api.MODELS[0]['id'], 'text': 'site brief'}
 
@@ -81,6 +89,30 @@ class PlanningAPI(unittest.TestCase):
         self.assertNotIn('gpu_count', json.dumps(body))
         self.assertIn('403', body['details'][0])
 
+    def test_server_key_used_without_browser_key(self):
+        with patch.object(api, '_server_key', return_value='private-server-key'), patch.object(api, '_verify_key', return_value=False) as verify:
+            status, body = api._plan({'model': api.MODELS[0]['id'], 'text': 'brief'})
+        verify.assert_called_once_with('private-server-key')
+        self.assertEqual(status, 401)
+        self.assertNotIn('private-server-key', json.dumps(body))
+
+    def test_optional_project_access_code(self):
+        with patch.dict(api.os.environ, {'PLANNER_ACCESS_CODE': 'project-code'}):
+            self.assertEqual(api._plan(self.payload())[0], 401)
+            with patch.object(api, '_verify_key', return_value=False):
+                self.assertEqual(api._plan({**self.payload(), 'accessCode': 'project-code'})[0], 401)
+
+    def test_v4_failure_does_not_issue_a_report(self):
+        from local_input import complete_local_information
+        text = "GPU count 64; roof area 2000 m2; grid capacity 1000 kW; backup duration 2 hours; UPS duration 10 minutes; training share 50%; PV peak capacity factor 0.7; electricity price USD 0.12/kWh; ambient temperature 25 C; no training burst; minimize annual cost."
+        context = complete_local_information({'text': text, 'backend': 'scipy', 'interactive': False})
+        context['research']['point'] = {'latitude': 33.4484, 'longitude': -112.074, 'name': 'Phoenix'}
+        with patch.object(api, '_verify_key', return_value=True), patch('initial_input.complete_initial_information', return_value=context), patch('v4_simulation.evaluate', side_effect=RuntimeError('test failure')):
+            status, body = api._plan(self.payload())
+        self.assertEqual(status, 500)
+        self.assertIn('v4 evaluation did not complete', body['error'])
+        self.assertNotIn('report', body)
+
     def test_invalid_input(self):
         self.assertEqual(api._plan({})[0], 400)
         self.assertEqual(api._plan({**self.payload(), 'model': 'unknown'})[0], 400)
@@ -119,6 +151,19 @@ class PlanningAPI(unittest.TestCase):
         self.assertEqual(sum(r['category'] == 'Scenario' for r in body['rows']), 7)
         self.assertEqual(sum(r['category'] == 'Fault replay' for r in body['rows']), 8)
         self.assertNotIn('test-key', json.dumps(body))
+        report = body['report']
+        self.assertTrue(all(row['executed'] for row in report['validation']))
+        self.assertEqual([row['version'] for row in report['validation']], ['v4.1','v4.2','v4.3','v4.4','v4.5'])
+        self.assertIn('v4.5', report['html'])
+        self.assertIn('Hourly operating plan', report['html'])
+        self.assertIn('Equipment in each candidate', report['html'])
+        self.assertIn('Conservation audit', report['html'])
+        self.assertIn('not_applicable', report['html'])
+        self.assertTrue(report['evaluation']['replanning'])
+        self.assertGreater(len(report['html']), 10000)
+        import os
+        if os.environ.get('TEST_REPORT_OUTPUT'):
+            Path(os.environ['TEST_REPORT_OUTPUT']).write_text(json.dumps(body))
 
 if __name__ == '__main__':
     unittest.main()

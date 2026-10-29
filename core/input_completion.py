@@ -71,8 +71,10 @@ def valid_fact(field, value):
     return value > 0
 
 
-def clarify_constraint_issues(limits, issues, *, correction_parser=None, reply_interpreter=None):
+def clarify_constraint_issues(limits, issues, *, correction_parser=None, reply_interpreter=None, interactive=True):
     """Ask for one explicit replacement; unsupported metrics remain blocking."""
+    if not interactive:
+        return limits, issues
     prefixes = {
         "budget_usd": "CAPEX ceiling ",
         "renewable_fraction": "Renewable electricity must be at least ",
@@ -143,7 +145,7 @@ def complete_request(request, interpreted, *, local=False, fact_parser=None,
                 research["errors"].append("Cached coordinates do not match the requested location")
         else:
             research = lookup_location(location, search_tariff=("price_usd_kwh" not in facts and
-                                                            not local))
+                                                            not local and request.get("interactive", True)))
         for field, record in research["fields"].items():
             if field in facts:
                 difference = abs(facts[field] - record["value"])
@@ -177,7 +179,8 @@ def complete_request(request, interpreted, *, local=False, fact_parser=None,
                 if tariff and tariff.get("value_usd_kwh"):
                     print(f"Public tariff lead: {tariff['source_url']}; class: {tariff['tariff_class']}. "
                           "Applicability and the project contract are unverified; no price was auto-filled.")
-                reply = input(f"Please provide {question}. Enter /unknown if unavailable: ").strip()
+                reply = (input(f"Please provide {question}. Enter /unknown if unavailable: ").strip()
+                         if request.get("interactive", True) else "/unknown")
             except EOFError:
                 reply = "/unknown"
             if not reply or reply.lower() in ("/done", "/unknown"):
@@ -238,7 +241,7 @@ def complete_request(request, interpreted, *, local=False, fact_parser=None,
         clarification_issues.update(conflict_parser(text))
     limits, clarification_issues = clarify_constraint_issues(
         limits, clarification_issues, correction_parser=constraint_parser,
-        reply_interpreter=reply_interpreter)
+        reply_interpreter=reply_interpreter, interactive=request.get("interactive", True))
     if goal == "unresolved_objective":
         clarification_issues["objective"] = (
             "The planning objective was mentioned but could not be confirmed consistently; "

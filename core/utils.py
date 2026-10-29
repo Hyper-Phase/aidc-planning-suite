@@ -5,6 +5,9 @@ import json
 import math
 import os
 import time
+from contextvars import ContextVar
+
+REQUEST_AGENT = ContextVar("request_agent", default=None)
 import numpy as np
 
 
@@ -260,6 +263,9 @@ class APIAgent:
         self.model=model or os.environ.get('OPENROUTER_MODEL','deepseek/deepseek-v4.1-flash')
 
     def complete(self, system, user):
+        agent = REQUEST_AGENT.get()
+        if agent is not None:
+            return agent.complete(system, user)
         if not os.environ.get('OPENROUTER_API_KEY','').strip():
             raise RuntimeError('OPENROUTER_API_KEY is missing')
         from langchain_openrouter import ChatOpenRouter

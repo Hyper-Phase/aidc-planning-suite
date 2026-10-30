@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "core"))
 sys.dont_write_bytecode = True
 
 MODELS = [
-    {"id": "deepseek/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash"},
+    {"id": "deepseek/deepseek-v4.1-flash", "label": "DeepSeek Flash"},
     {"id": "openai/gpt-4o-mini", "label": "GPT-4o mini"},
     {"id": "anthropic/claude-3.5-haiku", "label": "Claude 3.5 Haiku"},
     {"id": "google/gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
@@ -44,7 +44,7 @@ def _configuration():
         configured = False
     return {"serverKeyConfigured": configured,
             "accessCodeRequired": bool(os.environ.get("PLANNER_ACCESS_CODE", "")),
-            "workflow": "v4.5", "models": MODELS}
+            "workflow": "Five-stage planning", "models": MODELS}
 
 
 def _plan(data):
@@ -120,9 +120,9 @@ def _plan(data):
             study = evaluate("v4.5", model_result["boundary"], context["facts"], features,
                              model_result["cost"], context["backend"])
         except Exception:
-            return 500, {"error": "The baseline solved, but the v4 evaluation did not complete. No complete validation report has been issued."}
+            return 500, {"error": "The baseline solved, but the stage evaluation did not complete. No complete validation report has been issued."}
         from web_report import build_report
-        report = build_report(context, manifest, study, model_result["cost"], model)
+        report = build_report(context, manifest, study, model_result["cost"], next(item["label"] for item in MODELS if item["id"] == model))
         return 200, {"model": model, "rows": _table_rows(context, study, manifest), "report": report,
                      "caveat": "Offline research scenario using public data and explicit assumptions. Not site certification, a reliability guarantee, or real-time control."}
     except Exception as exc:

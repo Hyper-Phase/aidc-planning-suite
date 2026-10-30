@@ -110,7 +110,7 @@ class PlanningAPI(unittest.TestCase):
         with patch.object(api, '_verify_key', return_value=True), patch('initial_input.complete_initial_information', return_value=context), patch('v4_simulation.evaluate', side_effect=RuntimeError('test failure')):
             status, body = api._plan(self.payload())
         self.assertEqual(status, 500)
-        self.assertIn('v4 evaluation did not complete', body['error'])
+        self.assertIn('stage evaluation did not complete', body['error'])
         self.assertNotIn('report', body)
 
     def test_invalid_input(self):
@@ -153,8 +153,9 @@ class PlanningAPI(unittest.TestCase):
         self.assertNotIn('test-key', json.dumps(body))
         report = body['report']
         self.assertTrue(all(row['executed'] for row in report['validation']))
-        self.assertEqual([row['version'] for row in report['validation']], ['v4.1','v4.2','v4.3','v4.4','v4.5'])
-        self.assertIn('v4.5', report['html'])
+        self.assertEqual([row['stage'] for row in report['validation']], ['Stage 1','Stage 2','Stage 3','Stage 4','Stage 5'])
+        self.assertIn('Stage 5', report['html'])
+        self.assertNotIn('v4', report['html'].lower())
         self.assertIn('Hourly operating plan', report['html'])
         self.assertIn('Equipment in each candidate', report['html'])
         self.assertIn('Conservation audit', report['html'])

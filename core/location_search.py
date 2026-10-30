@@ -33,17 +33,20 @@ def source(value, url, title, location, period, unit, method, status="estimated"
 
 
 def geocode(location, fetch):
-    city, _, country_hint = location.partition(",")
-    url = GEOCODE + "?" + urlencode({"name": city.strip(), "count": 10, "language": "en", "format": "json"})
+    parts = [part.strip() for part in location.split(",") if part.strip()]
+    if not parts:
+        raise ValueError("A city and country or explicit coordinates are required")
+    city = parts[0]
+    url = GEOCODE + "?" + urlencode({"name": city, "count": 10, "language": "en", "format": "json"})
     matches = fetch(url).get("results") or []
-    if country_hint.strip():
-        hint = country_hint.strip().lower()
-        aliases = {"uk": "united kingdom", "gb": "united kingdom", "us": "united states",
-                   "usa": "united states"}
-        hint = aliases.get(hint, hint)
-        matches = [item for item in matches if hint in str(item.get("country", "")).lower()
-                   or hint in str(item.get("admin1", "")).lower()
-                   or hint == str(item.get("country_code", "")).lower()]
+    aliases = {"uk": "united kingdom", "gb": "united kingdom", "us": "united states",
+               "usa": "united states"}
+    for part in parts[1:]:
+        hint = aliases.get(part.casefold(), part.casefold())
+        matches = [item for item in matches if any(
+            hint in str(item.get(key, "")).casefold()
+            for key in ("country", "admin1", "admin2", "admin3", "admin4"))
+            or hint == str(item.get("country_code", "")).casefold()]
     if not matches:
         raise ValueError(f"No coordinates found for {location}")
     match = matches[0]

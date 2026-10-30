@@ -94,6 +94,9 @@ def _plan(data):
             details.extend(context.get("clarification_issues", {}).values())
             if not context["research"].get("point"):
                 details.append("A valid site location is required.")
+                details.extend(str(reason).replace(api_key, "[redacted]")[:500]
+                               for reason in context.get("research", {}).get("errors", [])
+                               if str(reason).startswith("geocoding:"))
             from input_completion import INPUT_QUESTIONS
             questions = [{"field": field, "label": INPUT_QUESTIONS.get(field, field)} for field in context["missing"]]
             if not context["research"].get("point"):
